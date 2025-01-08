@@ -1,0 +1,112 @@
+import cv2
+import mediapipe as mp
+import math
+import pyttsx3
+import threading
+
+# pyttsx3 motoru ve kilit
+engine = pyttsx3.init()
+lock = threading.Lock()
+
+# Sesli geri bildirim fonksiyonu (seri hale getirilmiş)
+def verbal_feedback(text):
+    def speak():
+        with lock:
+            engine.say(text)
+            engine.runAndWait()
+    threading.Thread(target=speak, daemon=True).start()
+
+# Açı hesaplama fonksiyonu
+def calculate_angle(a, b, c):
+    angle = math.degrees(math.atan2(c[1] - b[1], c[0] - b[0]) -
+                         math.atan2(a[1] - b[1], a[0] - b[0]))
+    return abs(angle)
+
+# Egzersiz seçimi
+exercise = input("Hangi egzersizi yapmak istiyorsunuz? (kol/bacak): ").strip().lower()
+
+if exercise not in ["kol", "bacak"]:
+    verbal_feedback("Geçersiz seçenek. Lütfen tekrar deneyin.")
+    exit()
+
+# Kamera başlatma
+cap = cv2.VideoCapture(0)
+
+if not cap.isOpened():
+    verbal_feedback("Kamera açılamadı. Lütfen cihazınızın kamerasını kontrol edin.")
+    exit()
+
+# Mediapipe Pose
+mp_pose = mp.solutions.pose
+pose = mp_pose.Pose()
+mp_drawing = mp.solutions.drawing_utils
+
+verbal_feedback(f"{exercise} egzersizi için kamera başlatıldı.")
+
+# Sürekli görüntü işleme
+try:
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Görüntüyü küçülterek işlemeyi hızlandır
+        frame = cv2.resize(frame, (640, 480))
+
+        # Görüntüyü RGB formatına çevir
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        result = pose.process(rgb_frame)
+
+        # Postür tespiti
+        if result.pose_landmarks:
+            mp_drawing.draw_landmarks(frame, result.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+            
+            # Kol egzersizi için sağ kol açısını hesapla
+            if exercise == "kol":
+                landmarks = result.pose_landmarks.landmark
+                shoulder = [landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER].x, landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER].y]
+                elbow = [landmarks[mp_pose.PoseLandmark.RIGHT_ELBOW].x, landmarks[mp_pose.PoseLandmark.RIGHT_ELBOW].y]
+                wrist = [landmarks[mp_pose.PoseLandmark.RIGHT_WRIST].x, landmarks[mp_pose.PoseLandmark.RIGHT_WRIST].y]
+                
+                angle = calculate_angle(shoulder, elbow, wrist)
+
+                # Açıya göre sesli geri bildirim
+                if angle < 45:
+                    verbal_feedback("Kolunuzu daha fazla açın.")
+                elif angle > 135:
+                    verbal_feedback("Kolunuzu biraz daha bükün.")
+                else:
+                    verbal_feedback("Kol pozisyonunuz doğru görünüyor.")
+            
+            # Bacak egzersizi için diz ile ayak bileği açısını hesapla
+            elif exercise == "bacak":
+                landmarks = result.pose_landmarks.landmark
+                hip = [landmarks[mp_pose.PoseLandmark.LEFT_HIP].x, landmarks[mp_pose.PoseLandmark.LEFT_HIP].y]
+                knee = [landmarks[mp_pose.PoseLandmark.LEFT_KNEE].x, landmarks[mp_pose.PoseLandmark.LEFT_KNEE].y]
+                ankle = [landmarks[mp_pose.PoseLandmark.LEFT_ANKLE].x, landmarks[mp_pose.PoseLandmark.LEFT_ANKLE].y]
+                
+                # Diz ile ayak bileği arasındaki açı hesaplanır
+                angle = calculate_angle(hip, knee, ankle)
+
+                # Açıya göre sesli geri bildirim
+                if angle < 60:
+                    verbal_feedback("Bacağınızı biraz daha bükün.")
+                elif angle > 170:
+                    verbal_feedback("Bacağınızı daha fazla açın.")
+                else:
+                    verbal_feedback("Bacak pozisyonunuz doğru görünüyor.")
+
+        # Görüntüyü ekranda göster
+        cv2.imshow(f"{exercise.capitalize()} Egzersiz Takibi", frame)
+
+        # Çıkış için 'q' tuşuna basın
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            verbal_feedback("Egzersiz sona erdi.")
+            print("Programdan çıkılıyor...")
+            break
+except Exception as e:
+    print(f"Bir hata oluştu: {e}")
+
+# Kamera ve pencereleri kapatma
+cap.release()
+cv2.destroyAllWindows()
